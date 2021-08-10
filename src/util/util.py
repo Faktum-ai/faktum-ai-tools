@@ -1,8 +1,5 @@
 import hashlib
-
-import numpy as np
 from pandas.core.indexes.api import Index
-
 
 def add_checksum_column(self, id_col=None, subset=None, sep="-", inplace=False):
     """

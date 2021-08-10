@@ -1,0 +1,8 @@
+README.md
+setup.py
+src/faktum_ai_tools.egg-info/PKG-INFO
+src/faktum_ai_tools.egg-info/SOURCES.txt
+src/faktum_ai_tools.egg-info/dependency_links.txt
+src/faktum_ai_tools.egg-info/top_level.txt
+src/util/__init__.py
+src/util/util.py

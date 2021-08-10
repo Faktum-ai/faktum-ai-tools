@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: faktum-ai-tools
+Version: 0.0.1
+Summary: Faktum AI Util
+Home-page: https://github.com/Faktum-ai/faktum-ai-tools/
+Author: faktum-ai
+Author-email: henrik@dataops.dk
+License: UNKNOWN
+Project-URL: Bug Tracker, https://github.com/Faktum-ai/faktum-ai-tools/issues
+Description: # faktum-ai-tools
+        
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
