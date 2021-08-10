@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="faktum-ai-tools",
-    version="0.0.2",
+    version="0.0.3",
     author="faktum-ai",
     author_email="henrik@dataops.dk",
     description="Faktum AI Util",
@@ -21,5 +21,7 @@ setuptools.setup(
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
     python_requires=">=3.8",
-    
+    install_requires=[
+          'pandas>=1.3',
+      ],
 )
