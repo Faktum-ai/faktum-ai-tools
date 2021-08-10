@@ -5,15 +5,15 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="faktum_ai_tools",
-    version="0.0.1",
+    version="0.0.2",
     author="faktum-ai",
     author_email="henrik@dataops.dk",
     description="Faktum AI Util",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/Faktum-ai/faktum-ai-tools/",
+    url="https://github.com/Faktum-ai/faktum_ai_tools/",
     project_urls={
-        "Bug Tracker": "https://github.com/Faktum-ai/faktum-ai-tools/issues",
+        "Bug Tracker": "https://github.com/Faktum-ai/faktum_ai_tools/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
