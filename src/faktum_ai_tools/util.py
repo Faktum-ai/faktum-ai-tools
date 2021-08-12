@@ -1,4 +1,9 @@
 import hashlib
+
+import numpy as np
+import pandas as pd
+import sqlalchemy
+
 from pandas.core.indexes.api import Index
 
 def add_checksum_column(self, id_col=None, subset=None, sep="-", inplace=False):
@@ -98,3 +103,152 @@ def add_checksum_column(self, id_col=None, subset=None, sep="-", inplace=False):
         return None
     else:
         return result
+
+
+def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, checksum_column: str, df: pd.DataFrame) -> None:
+    """Upserts the dataframe as-is to the table.
+    
+    Upsert means UPDATE or INSERT. This function does not handles DELETEs. For delete functionality checkout `sync_dataframe_to_mssql`.
+
+    Parameters
+    ----------
+    engine : sqlalchemy.engine.Engine, required
+        The sqlachemy engine to use when connecting to the database.
+    table_name_to_update : the name of the table to update, required
+    primary_key_cols : List of column names, required
+        A list of column names to match on. The rows that match are updated. The rows that are not matched are inserted.
+    df : pandas.DataFrame, required
+        The data to insert/update. Keep columns in the correct order, and make sure the column names match the column names in the database.
+
+    Returns
+    -------
+    None
+        Returns None if everything goes well. Raises and exception if not.
+    """
+    
+    # building the command terms
+    cols_list = df.columns.tolist()
+    cols_list_query = f'({(", ".join(cols_list))})'
+    sr_cols_list = [f'Source.{i}' for i in cols_list]
+    sr_cols_list_query = f'({(", ".join(sr_cols_list))})'
+    up_cols_list = [f'{i}=Source.{i}' for i in cols_list]
+    up_cols_list_query = f'{", ".join(up_cols_list)}'
+        
+    # fill values that should be interpreted as "NULL" with None
+    def fill_null(vals: list) -> list:
+        def bad(val):
+            if isinstance(val, type(pd.NA)):
+                return True
+            # the list of values you want to interpret as 'NULL' should be 
+            # tweaked to your needs
+            return val in ['NULL', np.nan, 'nan']
+        return tuple(i if not bad(i) else None for i in vals)
+
+    # create the list of parameter indicators (?, ?, ?, etc...)
+    # and the parameters, which are the values to be inserted
+    params = [fill_null(row.tolist()) for _, row in df.iterrows()]
+    param_slots = '('+', '.join(['?']*len(df.columns))+')'
+    
+    merge_on = []
+    for primary_key_col in primary_key_cols:
+        merge_on.append(f'''Target.{primary_key_col}=Source.{primary_key_col} 
+        ''')
+    merge_on_str = ' AND '.join(merge_on)        
+
+    cmd = f'''
+        MERGE INTO {table_name_to_update} AS Target
+        USING (
+            SELECT * 
+            FROM (VALUES {param_slots}) AS s {cols_list_query}
+        ) AS Source
+        ON {merge_on_str}
+        WHEN NOT MATCHED THEN
+        INSERT {cols_list_query} VALUES {sr_cols_list_query} 
+        WHEN MATCHED AND Target.{checksum_column}=Source.{checksum_column} THEN 
+        UPDATE SET {up_cols_list_query};
+        '''
+    print(cmd)
+    # execute the command to merge tables
+    with engine.begin() as conn:
+        conn.execute(cmd, params)
+
+
+def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, checksum_column: str, df: pd.DataFrame) -> None:
+    """Syncs the dataframe as-is to the table. Use with caution.
+    
+    Sync means it will handle both INSERT, UPDATE and DELETE. 
+    
+    ***Use with cation!*** This will delete everything in the table, that is not matched by the `df` dataframe.
+
+    Parameters
+    ----------
+    engine : sqlalchemy.engine.Engine, required
+        The sqlachemy engine to use when connecting to the database.
+    table_name_to_update : the name of the table to update, required
+    primary_key_cols : List of column names, required
+        A list of column names to match on. The rows that match are updated. The rows that are not matched are inserted.
+    df : pandas.DataFrame, required
+        The data to sync. Keep columns in the correct order, and make sure the column names match the column names in the database.
+
+    Returns
+    -------
+    None
+        Returns None if everything goes well. Raises and exception if not.
+    """
+    
+    # building the command terms
+    cols_list = df.columns.tolist()
+    cols_list_query = f'({(", ".join(cols_list))})'
+    sr_cols_list = [f'Source.{i}' for i in cols_list]
+    sr_cols_list_query = f'({(", ".join(sr_cols_list))})'
+    up_cols_list = [f'{i}=Source.{i}' for i in cols_list]
+    up_cols_list_query = f'{", ".join(up_cols_list)}'
+        
+    # fill values that should be interpreted as "NULL" with None
+    def fill_null(vals: list) -> list:
+        def bad(val):
+            if isinstance(val, type(pd.NA)):
+                return True
+            # the list of values you want to interpret as 'NULL' should be 
+            # tweaked to your needs
+            return val in ['NULL', np.nan, 'nan']
+        return tuple(i if not bad(i) else None for i in vals)
+
+    # create the list of parameter indicators (?, ?, ?, etc...)
+    # and the parameters, which are the values to be inserted
+    params = [fill_null(row.tolist()) for _, row in df.iterrows()]
+    param_slots = '('+', '.join(['?']*len(df.columns))+')'
+    
+    merge_on = []
+    for primary_key_col in primary_key_cols:
+        merge_on.append(f'''Target.{primary_key_col}=Source.{primary_key_col} 
+        ''')
+    merge_on_str = ' AND '.join(merge_on)
+
+    check_on = []
+    for col in cols_list:
+        check_on.append(f'''Target.{col}<>Source.{col} 
+        ''')
+    check_on_str = ' OR '.join(check_on)
+
+    cmd = f'''
+        MERGE INTO {table_name_to_update} AS Target
+        USING (
+            SELECT * 
+            FROM (VALUES {param_slots}) AS s {cols_list_query}
+        ) AS Source
+        ON {merge_on_str}
+        WHEN NOT MATCHED BY Source THEN
+            DELETE
+
+        WHEN NOT MATCHED BY Target THEN
+            INSERT {cols_list_query} VALUES {sr_cols_list_query} 
+
+        WHEN MATCHED AND {check_on_str} THEN 
+            UPDATE SET {up_cols_list_query};
+        '''
+    print(cmd)
+    # execute the command to merge tables
+    with engine.begin() as conn:
+        print('Executing')
+        conn.execute(cmd, params)
