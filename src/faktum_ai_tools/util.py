@@ -105,7 +105,7 @@ def add_checksum_column(self, id_col=None, subset=None, sep="-", inplace=False):
         return result
 
 
-def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, checksum_column: str, df: pd.DataFrame) -> None:
+def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame) -> None:
     """Upserts the dataframe as-is to the table.
     
     Upsert means UPDATE or INSERT. This function does not handles DELETEs. For delete functionality checkout `sync_dataframe_to_mssql`.
@@ -153,7 +153,13 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
     for primary_key_col in primary_key_cols:
         merge_on.append(f'''Target.{primary_key_col}=Source.{primary_key_col} 
         ''')
-    merge_on_str = ' AND '.join(merge_on)        
+    merge_on_str = ' AND '.join(merge_on)
+
+    check_on = []
+    for col in cols_list:
+        check_on.append(f'''Target.{col}<>Source.{col} 
+        ''')
+    check_on_str = ' OR '.join(check_on)
 
     cmd = f'''
         MERGE INTO {table_name_to_update} AS Target
@@ -163,9 +169,9 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
         ) AS Source
         ON {merge_on_str}
         WHEN NOT MATCHED THEN
-        INSERT {cols_list_query} VALUES {sr_cols_list_query} 
-        WHEN MATCHED AND Target.{checksum_column}=Source.{checksum_column} THEN 
-        UPDATE SET {up_cols_list_query};
+            INSERT {cols_list_query} VALUES {sr_cols_list_query} 
+        WHEN MATCHED AND {check_on_str} THEN 
+            UPDATE SET {up_cols_list_query};
         '''
     print(cmd)
     # execute the command to merge tables
@@ -173,7 +179,7 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
         conn.execute(cmd, params)
 
 
-def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, checksum_column: str, df: pd.DataFrame) -> None:
+def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame) -> None:
     """Syncs the dataframe as-is to the table. Use with caution.
     
     Sync means it will handle both INSERT, UPDATE and DELETE. 
