@@ -184,7 +184,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     
     Sync means it will handle both INSERT, UPDATE and DELETE. 
     
-    ***Use with cation!*** This will delete everything in the table, that is not matched by the `df` dataframe.
+    ***Use with caution!*** This will delete everything in the table, that is not matched by the `df` dataframe.
 
     Parameters
     ----------
@@ -241,7 +241,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         MERGE INTO {table_name_to_update} AS Target
         USING (
             SELECT * 
-            FROM (VALUES {param_slots}) AS s {cols_list_query}
+            FROM (VALUES {" ".join([param_slots]*df.shape[0])}) AS s {cols_list_query}
         ) AS Source
         ON {merge_on_str}
         WHEN NOT MATCHED BY Source THEN
@@ -256,5 +256,6 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     print(cmd)
     # execute the command to merge tables
     with engine.begin() as conn:
-        print('Executing')
+        print('Executing...', end='')
         conn.execute(cmd, params)
+        print(' Done')
