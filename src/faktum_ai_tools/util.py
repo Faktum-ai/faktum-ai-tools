@@ -268,7 +268,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         rows = result.fetchall()
         print(' Done')
     
-    to_be_deleted = set(rows) - set([tuple(i) for i in df[['id']].values])
+    to_be_deleted = set(rows) - set([tuple(i) for i in df[primary_key_cols].values])
     if len(to_be_deleted) > 0:
         delete_on = []
         for primary_key_col in primary_key_cols:
