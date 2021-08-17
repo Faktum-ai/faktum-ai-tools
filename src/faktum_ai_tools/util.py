@@ -173,7 +173,6 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
         WHEN MATCHED AND {check_on_str} THEN 
             UPDATE SET {up_cols_list_query};
         '''
-    print(cmd)
     # execute the command to merge tables
     with engine.begin() as conn:
         conn.execute(cmd, params)
@@ -241,7 +240,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         MERGE INTO {table_name_to_update} AS Target
         USING (
             SELECT * 
-            FROM (VALUES {" ".join([param_slots]*df.shape[0])}) AS s {cols_list_query}
+            FROM (VALUES {param_slots}) AS s {cols_list_query}
         ) AS Source
         ON {merge_on_str}
         WHEN NOT MATCHED BY Source THEN
@@ -253,9 +252,41 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         WHEN MATCHED AND {check_on_str} THEN 
             UPDATE SET {up_cols_list_query};
         '''
-    print(cmd)
+
     # execute the command to merge tables
     with engine.begin() as conn:
-        print('Executing...', end='')
+        print('Executing UPSERT statement...', end='')
         conn.execute(cmd, params)
         print(' Done')
+
+    # Handle DELETE's
+    cmd = f'''
+    SELECT {', '.join(primary_key_cols)}
+    FROM {table_name_to_update};
+    '''
+
+    with engine.begin() as conn:
+        print('Executing SELECT statement...', end='')
+        result = conn.execute(cmd)
+        rows = result.fetchall()
+        print(' Done')
+    
+    to_be_deleted = set(rows) - set([tuple(i) for i in df[['id']].values])
+    if len(to_be_deleted) > 0:
+        delete_on = []
+        for primary_key_col in primary_key_cols:
+            delete_on.append(f'''{primary_key_col}=? 
+            ''')
+        delete_on_str = ' AND '.join(delete_on)
+
+        delete_cmd = f'''
+        DELETE FROM {table_name_to_update}
+        WHERE {delete_on_str}'''
+
+        # execute the delete command 
+        with engine.begin() as conn:
+            print('Executing DELETE statement...', end='')
+            conn.execute(delete_cmd, list(to_be_deleted))
+            print(' Done')
+    else:
+        print('Nothing to delete. Moving on.')
