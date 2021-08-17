@@ -243,9 +243,6 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
             FROM (VALUES {param_slots}) AS s {cols_list_query}
         ) AS Source
         ON {merge_on_str}
-        WHEN NOT MATCHED BY Source THEN
-            DELETE
-
         WHEN NOT MATCHED BY Target THEN
             INSERT {cols_list_query} VALUES {sr_cols_list_query} 
 
