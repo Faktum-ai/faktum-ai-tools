@@ -1,5 +1,6 @@
 import hashlib
 
+import math
 import numpy as np
 import pandas as pd
 import sqlalchemy
@@ -105,6 +106,18 @@ def add_checksum_column(self, id_col=None, subset=None, sep="-", inplace=False):
         return result
 
 
+def fill_null(vals: list) -> list:
+    def bad(val):
+        if isinstance(val, type(pd.NA)):
+            return True
+        if math.isnan(val):
+            return True
+        # the list of values you want to interpret as 'NULL' should be 
+        # tweaked to your needs
+        return val in ['NULL', np.nan, 'nan']
+    return tuple(i if not bad(i) else None for i in vals)
+
+
 def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame) -> None:
     """Upserts the dataframe as-is to the table.
     
@@ -133,19 +146,10 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
     sr_cols_list_query = f'({(", ".join(sr_cols_list))})'
     up_cols_list = [f'{i}=Source.{i}' for i in cols_list]
     up_cols_list_query = f'{", ".join(up_cols_list)}'
-        
-    # fill values that should be interpreted as "NULL" with None
-    def fill_null(vals: list) -> list:
-        def bad(val):
-            if isinstance(val, type(pd.NA)):
-                return True
-            # the list of values you want to interpret as 'NULL' should be 
-            # tweaked to your needs
-            return val in ['NULL', np.nan, 'nan']
-        return tuple(i if not bad(i) else None for i in vals)
 
     # create the list of parameter indicators (?, ?, ?, etc...)
     # and the parameters, which are the values to be inserted
+    # fill values that should be interpreted as "NULL" with None
     params = [fill_null(row.tolist()) for _, row in df.iterrows()]
     param_slots = '('+', '.join(['?']*len(df.columns))+')'
     
@@ -208,16 +212,6 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     sr_cols_list_query = f'({(", ".join(sr_cols_list))})'
     up_cols_list = [f'{i}=Source.{i}' for i in cols_list]
     up_cols_list_query = f'{", ".join(up_cols_list)}'
-        
-    # fill values that should be interpreted as "NULL" with None
-    def fill_null(vals: list) -> list:
-        def bad(val):
-            if isinstance(val, type(pd.NA)):
-                return True
-            # the list of values you want to interpret as 'NULL' should be 
-            # tweaked to your needs
-            return val in ['NULL', np.nan, 'nan']
-        return tuple(i if not bad(i) else None for i in vals)
 
     # create the list of parameter indicators (?, ?, ?, etc...)
     # and the parameters, which are the values to be inserted
