@@ -121,11 +121,11 @@ def build_where(start_date_filter_col: str = None, start_date_filter: str = None
     where_filter = ""
     #Build optional filter condition
     if (start_date_filter_col != None and end_date_filter_col != None):
-        where_filter = f" AND [Target].[{start_date_filter_col}] >= '{start_date_filter}' AND [Target].[{end_date_filter_col}] <= '{end_date_filter}'"
+        where_filter = f"AND [Target].[{start_date_filter_col}] >= '{start_date_filter}' AND [Target].[{end_date_filter_col}] <= '{end_date_filter}'"
     elif (start_date_filter_col != None):
-        where_filter = f" AND [Target].[{start_date_filter_col}] >= '{start_date_filter}'"
+        where_filter = f"AND [Target].[{start_date_filter_col}] >= '{start_date_filter}'"
     elif (end_date_filter_col != None):
-        where_filter = f" AND [Target].[{end_date_filter_col}] <= '{end_date_filter}'"
+        where_filter = f"AND [Target].[{end_date_filter_col}] <= '{end_date_filter}'"
     return where_filter
 
 def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame
@@ -192,10 +192,10 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
             FROM (VALUES {param_slots}) AS s ({cols_list_query})
         ) AS [Source]
         ON {merge_on_str}
-        WHEN NOT MATCHED{where_filter} THEN
+        WHEN NOT MATCHED {where_filter} THEN
             INSERT ({cols_list_query}) 
             VALUES ({sr_cols_list_query})
-        WHEN MATCHED AND ({check_on_str}){where_filter} THEN 
+        WHEN MATCHED AND ({check_on_str}) {where_filter} THEN 
             UPDATE SET {up_cols_list_query};
         '''
     # execute the command to merge tables
@@ -237,10 +237,10 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     
     # building the command terms
     cols_list = df.columns.tolist()
-    cols_list_query = f'({(", ".join(cols_list))})'
-    sr_cols_list = [f'Source.{i}' for i in cols_list]
-    sr_cols_list_query = f'({(", ".join(sr_cols_list))})'
-    up_cols_list = [f'{i}=Source.{i}' for i in cols_list]
+    cols_list_query = f'[{("], [".join(cols_list))}]'
+    sr_cols_list = [f'[Source].[{i}]' for i in cols_list]
+    sr_cols_list_query = f'{(", ".join(sr_cols_list))}'
+    up_cols_list = [f'[{i}]=[Source].[{i}]' for i in cols_list]
     up_cols_list_query = f'{", ".join(up_cols_list)}'
 
     # create the list of parameter indicators (?, ?, ?, etc...)
@@ -250,13 +250,13 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     
     merge_on = []
     for primary_key_col in primary_key_cols:
-        merge_on.append(f'''Target.{primary_key_col}=Source.{primary_key_col} 
+        merge_on.append(f'''[Target].[{primary_key_col}]=[Source].[{primary_key_col}] 
         ''')
     merge_on_str = ' AND '.join(merge_on)
 
     check_on = []
     for col in cols_list:
-        check_on.append(f'''Target.{col}<>Source.{col} 
+        check_on.append(f'''[Target].[{col}]<>[Source].[{col}] 
         ''')
     check_on_str = ' OR '.join(check_on)
     
@@ -269,10 +269,10 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
             FROM (VALUES {param_slots}) AS s ({cols_list_query})
         ) AS [Source]
         ON {merge_on_str}
-        WHEN NOT MATCHED{where_filter} THEN
+        WHEN NOT MATCHED {where_filter} THEN
             INSERT ({cols_list_query}) 
             VALUES ({sr_cols_list_query})
-        WHEN MATCHED AND ({check_on_str}){where_filter} THEN 
+        WHEN MATCHED AND ({check_on_str}) {where_filter} THEN 
             UPDATE SET {up_cols_list_query};
         '''
 
@@ -286,7 +286,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     cmd = f'''
     SELECT {', '.join(primary_key_cols)}
     FROM {table_name_to_update}
-    WHERE 1=1{where_filter};
+    WHERE 1=1 {where_filter};
     '''
 
     with engine.begin() as conn:
