@@ -117,7 +117,7 @@ def fill_null(vals: list) -> list:
         return val in ['NULL', np.nan, 'nan']
     return tuple(i if not bad(i) else None for i in vals)
 
-def build_where(start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> str:
+def build_where_with_bracket(start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> str:
     where_filter = ""
     #Build optional filter condition
     if (start_date_filter_col != None and end_date_filter_col != None):
@@ -128,7 +128,46 @@ def build_where(start_date_filter_col: str = None, start_date_filter: str = None
         where_filter = f"AND [Target].[{end_date_filter_col}] <= '{end_date_filter}'"
     return where_filter
 
-def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame
+def build_where(table_name_to_update: str, start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> str:
+    where_filter = ""
+    #Build optional filter condition
+    if (start_date_filter_col != None and end_date_filter_col != None):
+        where_filter = f"AND {table_name_to_update}.{start_date_filter_col} >= '{start_date_filter}' AND {table_name_to_update}.{end_date_filter_col} <= '{end_date_filter}'"
+    elif (start_date_filter_col != None):
+        where_filter = f"AND {table_name_to_update}.{start_date_filter_col} >= '{start_date_filter}'"
+    elif (end_date_filter_col != None):
+        where_filter = f"AND {table_name_to_update}.{end_date_filter_col} <= '{end_date_filter}'"
+    return where_filter
+
+def build_merge_cmd_mssql(table_name_to_update: str, cols_list_query: str, param_slots: str, merge_on_str: str, where_filter: str
+    , sr_cols_list_query: str, check_on_str: str, up_cols_list_query: str) -> str:
+    sql = f'''
+        MERGE INTO {table_name_to_update} AS [Target]
+        USING (
+            SELECT {cols_list_query} 
+            FROM (VALUES {param_slots}) AS s ({cols_list_query})
+        ) AS [Source]
+        ON {merge_on_str}
+        WHEN NOT MATCHED {where_filter} THEN
+            INSERT ({cols_list_query}) 
+            VALUES ({sr_cols_list_query})
+        WHEN MATCHED AND ({check_on_str}) {where_filter} THEN 
+            UPDATE SET {up_cols_list_query};
+        '''
+    return sql
+
+def build_merge_cmd_postgre(table_name_to_update: str, cols_list_query: str, param_slots: str, pk_list: str, where_filter: str, up_cols_list_query: str) -> str:
+    sql = f'''
+        INSERT INTO {table_name_to_update} ({cols_list_query})
+            VALUES {param_slots}
+        ON CONFLICT ({pk_list})
+            DO UPDATE SET {up_cols_list_query}
+        WHERE 1=1 {where_filter}
+    '''
+
+    return sql
+
+def upsert_dataframe_mssql(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame
     , start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> None:
     """Upserts the dataframe as-is to the table.
     
@@ -183,21 +222,76 @@ def upsert_dataframe(engine: sqlalchemy.engine.Engine, table_name_to_update: str
         ''')
     check_on_str = ' OR '.join(check_on)
 
-    where_filter = build_where(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
+    where_filter = build_where_with_bracket(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
 
-    cmd = f'''
-        MERGE INTO {table_name_to_update} AS [Target]
-        USING (
-            SELECT {cols_list_query} 
-            FROM (VALUES {param_slots}) AS s ({cols_list_query})
-        ) AS [Source]
-        ON {merge_on_str}
-        WHEN NOT MATCHED {where_filter} THEN
-            INSERT ({cols_list_query}) 
-            VALUES ({sr_cols_list_query})
-        WHEN MATCHED AND ({check_on_str}) {where_filter} THEN 
-            UPDATE SET {up_cols_list_query};
-        '''
+    cmd = build_merge_cmd_mssql(table_name_to_update=table_name_to_update, cols_list_query=cols_list_query, param_slots=param_slots
+        ,merge_on_str=merge_on_str, where_filter=where_filter, sr_cols_list_query=sr_cols_list_query, check_on_str=check_on_str, up_cols_list_query=up_cols_list_query)
+
+    # execute the command to merge tables
+    with engine.begin() as conn:
+        conn.execute(cmd, params)
+
+def upsert_dataframe_postgre(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame
+    , start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> None:
+    """Upserts the dataframe as-is to the table.
+    
+    Upsert means UPDATE or INSERT. This function does not handles DELETEs. For delete functionality checkout `sync_dataframe_to_postgre`.
+
+    Parameters
+    ----------
+    engine : sqlalchemy.engine.Engine, required
+        The sqlachemy engine to use when connecting to the database.
+    table_name_to_update : the name of the table to update, required
+    primary_key_cols : List of column names, required
+        A list of column names to match on. The rows that match are updated. The rows that are not matched are inserted.
+    df : pandas.DataFrame, required
+        The data to insert/update. Keep columns in the correct order, and make sure the column names match the column names in the database.
+    start_datetime_filter_col: str, optional
+        Target columnname of start_datetime to add filter too. Requires start_datetime_filter to have a datetime string. 
+    start_datetime_filter: str, optional
+        The date to filter (Target) start_datetime column from (>=). ex. '2021-01-01 12:00:00'. Must be parseable to SQL Server.
+    end_datetime_filter_col: str, optional
+        Target columnname of end_datetime to add filter too. Requires end_datetime_filter to have a datetime string. 
+    end_datetime_filter: str, optional
+        The datetime to filter (Target) end_datetime column from (<=). ex. '2021-01-01 12:00:00'. Must be parseable to SQL Server.
+    Returns
+    -------
+    None
+        Returns None if everything goes well. Raises an exception if not.
+    """
+    
+    # building the command terms
+    cols_list = df.columns.tolist()
+    cols_list_query = f'{(", ".join(cols_list))}'
+    
+    up_cols_list = [f'{i}=EXCLUDED.{i}' for i in cols_list]
+    up_cols_list_query = f'{", ".join(up_cols_list)}'
+
+    # create the list of parameter indicators ($1, $2, $3, etc...)
+    # and the parameters, which are the values to be inserted
+    # fill values that should be interpreted as "NULL" with None
+    params = [fill_null(row.tolist()) for _, row in df.iterrows()]
+    j = 1
+    param_slot_str = ""
+    for col in df.columns:
+        if j == 1:
+            param_slot_str = f'%s'
+        else:
+            param_slot_str = param_slot_str + f', %s'
+        j=j+1
+
+    param_slots = '('+param_slot_str+')'
+    
+    merge_on = []
+    for primary_key_col in primary_key_cols:
+        merge_on.append(f'''{primary_key_col}''')
+    merge_on_str = ', '.join(merge_on)
+
+    where_filter = build_where(table_name_to_update=table_name_to_update, start_date_filter_col=start_date_filter_col, start_date_filter=start_date_filter, end_date_filter_col=end_date_filter_col, end_date_filter=end_date_filter)   
+
+    cmd = build_merge_cmd_postgre(table_name_to_update=table_name_to_update, cols_list_query=cols_list_query, param_slots=param_slots
+        ,pk_list=merge_on_str, where_filter=where_filter, up_cols_list_query=up_cols_list_query)
+
     # execute the command to merge tables
     with engine.begin() as conn:
         conn.execute(cmd, params)
@@ -232,7 +326,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
     Returns
     -------
     None
-        Returns None if everything goes well. Raises and exception if not.
+        Returns None if everything goes well. Raises an exception if not.
     """
     
     # building the command terms
@@ -260,21 +354,111 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         ''')
     check_on_str = ' OR '.join(check_on)
     
+    where_filter = build_where_with_bracket(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
+
+    cmd = build_merge_cmd_mssql(table_name_to_update=table_name_to_update, cols_list_query=cols_list_query, param_slots=param_slots
+        ,merge_on_str=merge_on_str, where_filter=where_filter, sr_cols_list_query=sr_cols_list_query, check_on_str=check_on_str, up_cols_list_query=up_cols_list_query)
+
+    # execute the command to merge tables
+    with engine.begin() as conn:
+        print('Executing UPSERT statement...', end='')
+        conn.execute(cmd, params)
+        print(' Done')
+
+    # Handle DELETE's
+    cmd = f'''
+    SELECT {', '.join(primary_key_cols)}
+    FROM {table_name_to_update}
+    WHERE 1=1 {where_filter};
+    '''
+
+    with engine.begin() as conn:
+        print('Executing SELECT statement...', end='')
+        result = conn.execute(cmd)
+        rows = result.fetchall()
+        print(' Done')
+    
+    to_be_deleted = set(rows) - set([tuple(i) for i in df[primary_key_cols].values])
+    if len(to_be_deleted) > 0:
+        delete_on = []
+        for primary_key_col in primary_key_cols:
+            delete_on.append(f'''{primary_key_col}=? 
+            ''')
+        delete_on_str = ' AND '.join(delete_on)
+
+        delete_cmd = f'''
+        DELETE FROM {table_name_to_update}
+        WHERE {delete_on_str}'''
+
+        # execute the delete command 
+        with engine.begin() as conn:
+            print('Executing DELETE statement...', end='')
+            conn.execute(delete_cmd, list(to_be_deleted))
+            print(' Done')
+    else:
+        print('Nothing to delete. Moving on.')
+
+def sync_dataframe_to_postgre(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame
+    , start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> None:
+    """Syncs the dataframe as-is to the table. Use with caution.
+    
+    Sync means it will handle both INSERT, UPDATE and DELETE. 
+    
+    ***Use with caution!*** This will delete everything in the table, that is not matched by the `df` dataframe.
+
+    Parameters
+    ----------
+    engine : sqlalchemy.engine.Engine, required
+        The sqlachemy engine to use when connecting to the database.
+    table_name_to_update : the name of the table to update, required
+    primary_key_cols : List of column names, required
+        A list of column names to match on. The rows that match are updated. The rows that are not matched are inserted.
+    df : pandas.DataFrame, required
+        The data to sync. Keep columns in the correct order, and make sure the column names match the column names in the database.
+    start_datetime_filter_col: str, optional
+        Target columnname of start_datetime to add filter too. Requires start_datetime_filter to have a datetime string. 
+    start_datetime_filter: str, optional
+        The date to filter (Target) start_datetime column from (>=). ex. '2021-01-01 12:00:00'. Must be parseable to SQL Server.
+    end_datetime_filter_col: str, optional
+        Target columnname of end_datetime to add filter too. Requires end_datetime_filter to have a datetime string. 
+    end_datetime_filter: str, optional
+        The datetime to filter (Target) end_datetime column from (<=). ex. '2021-01-01 12:00:00'. Must be parseable to SQL Server.
+
+    Returns
+    -------
+    None
+        Returns None if everything goes well. Raises and exception if not.
+    """
+    
+    # building the command terms
+    cols_list = df.columns.tolist()
+    cols_list_query = f'{(", ".join(cols_list))}'
+    sr_cols_list = [f'Source.{i}' for i in cols_list]
+    sr_cols_list_query = f'{(", ".join(sr_cols_list))}'
+    up_cols_list = [f'{i}=Source.{i}' for i in cols_list]
+    up_cols_list_query = f'{", ".join(up_cols_list)}'
+
+    # create the list of parameter indicators (?, ?, ?, etc...)
+    # and the parameters, which are the values to be inserted
+    params = [fill_null(row.tolist()) for _, row in df.iterrows()]
+    param_slots = '('+', '.join(['?']*len(df.columns))+')'
+    
+    merge_on = []
+    for primary_key_col in primary_key_cols:
+        merge_on.append(f'''Target.{primary_key_col}=Source.{primary_key_col} 
+        ''')
+    merge_on_str = ' AND '.join(merge_on)
+
+    check_on = []
+    for col in cols_list:
+        check_on.append(f'''Target.{col}<>Source.{col} 
+        ''')
+    check_on_str = ' OR '.join(check_on)
+    
     where_filter = build_where(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
 
-    cmd = f'''
-        MERGE INTO {table_name_to_update} AS [Target]
-        USING (
-            SELECT {cols_list_query} 
-            FROM (VALUES {param_slots}) AS s ({cols_list_query})
-        ) AS [Source]
-        ON {merge_on_str}
-        WHEN NOT MATCHED {where_filter} THEN
-            INSERT ({cols_list_query}) 
-            VALUES ({sr_cols_list_query})
-        WHEN MATCHED AND ({check_on_str}) {where_filter} THEN 
-            UPDATE SET {up_cols_list_query};
-        '''
+    cmd = build_merge_cmd_postgre(table_name_to_update=table_name_to_update, cols_list_query=cols_list_query, param_slots=param_slots
+        ,merge_on_str=merge_on_str, where_filter=where_filter, sr_cols_list_query=sr_cols_list_query, check_on_str=check_on_str, up_cols_list_query=up_cols_list_query)
 
     # execute the command to merge tables
     with engine.begin() as conn:
