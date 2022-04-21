@@ -365,7 +365,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         conn.execute(cmd, params)
         print(' Done')
 
-    delete_where_filter = build_where(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
+    delete_where_filter = build_where(table_name_to_update, start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
     # Handle DELETE's
     cmd = f'''
     SELECT {', '.join(primary_key_cols)}
