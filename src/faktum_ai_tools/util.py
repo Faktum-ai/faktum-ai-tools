@@ -148,7 +148,7 @@ def build_merge_cmd_mssql(table_name_to_update: str, cols_list_query: str, param
             FROM (VALUES {param_slots}) AS s ({cols_list_query})
         ) AS [Source]
         ON {merge_on_str}
-        WHEN NOT MATCHED {where_filter} THEN
+        WHEN NOT MATCHED THEN
             INSERT ({cols_list_query}) 
             VALUES ({sr_cols_list_query})
         WHEN MATCHED AND ({check_on_str}) {where_filter} THEN 
@@ -365,11 +365,12 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         conn.execute(cmd, params)
         print(' Done')
 
+    delete_where_filter = build_where(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
     # Handle DELETE's
     cmd = f'''
     SELECT {', '.join(primary_key_cols)}
     FROM {table_name_to_update}
-    WHERE 1=1 {where_filter};
+    WHERE 1=1 {delete_where_filter};
     '''
 
     with engine.begin() as conn:
@@ -384,7 +385,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
         for primary_key_col in primary_key_cols:
             delete_on.append(f'''{primary_key_col}=? 
             ''')
-        delete_on_str = ' AND '.join(delete_on)
+        delete_on_str = ' OR '.join(delete_on)
 
         delete_cmd = f'''
         DELETE FROM {table_name_to_update}
@@ -397,6 +398,7 @@ def sync_dataframe_to_mssql(engine: sqlalchemy.engine.Engine, table_name_to_upda
             print(' Done')
     else:
         print('Nothing to delete. Moving on.')
+
 
 def sync_dataframe_to_postgre(engine: sqlalchemy.engine.Engine, table_name_to_update: str, primary_key_cols: list, df: pd.DataFrame
     , start_date_filter_col: str = None, start_date_filter: str = None, end_date_filter_col: str = None, end_date_filter: str = None) -> None:

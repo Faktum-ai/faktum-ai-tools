@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="faktum-ai-tools",
-    version="0.1.1",
+    version="0.1.6",
     author="faktum-ai",
     author_email="henrik@planmate.ai",
     description="Faktum AI Util",
