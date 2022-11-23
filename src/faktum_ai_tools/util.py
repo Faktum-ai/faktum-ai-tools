@@ -460,7 +460,7 @@ def sync_dataframe_to_postgre(engine: sqlalchemy.engine.Engine, table_name_to_up
     where_filter = build_where(start_date_filter_col, start_date_filter, end_date_filter_col, end_date_filter)
 
     cmd = build_merge_cmd_postgre(table_name_to_update=table_name_to_update, cols_list_query=cols_list_query, param_slots=param_slots
-        ,merge_on_str=merge_on_str, where_filter=where_filter, sr_cols_list_query=sr_cols_list_query, check_on_str=check_on_str, up_cols_list_query=up_cols_list_query)
+        ,pk_list=merge_on_str, where_filter=where_filter, sr_cols_list_query=sr_cols_list_query, check_on_str=check_on_str, up_cols_list_query=up_cols_list_query)
 
     # execute the command to merge tables
     with engine.begin() as conn:
